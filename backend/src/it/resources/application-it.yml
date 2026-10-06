@@ -1,0 +1,23 @@
+# 集成测试专用：H2 的 MySQL 兼容模式（仅在 -Pit 时生效，不影响正式 MySQL 部署）
+spring:
+  datasource:
+    url: jdbc:h2:mem:paper_mill;MODE=MySQL;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  # 不用主资源里的 MySQL schema.sql，表由 Hibernate 按实体生成
+  sql:
+    init:
+      mode: never
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: Asia/Shanghai
+  jackson:
+    time-zone: Asia/Shanghai
+    serialization:
+      write-dates-as-timestamps: false
