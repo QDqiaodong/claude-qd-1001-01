@@ -22,7 +22,14 @@ public interface PaperRollRepository extends JpaRepository<PaperRoll, Long> {
 
     List<PaperRoll> findByMachineIdAndStatus(Long machineId, String status);
 
+    List<PaperRoll> findByMachineIdAndStatusOrderByIdAsc(Long machineId, String status);
+
     List<PaperRoll> findByGrade(String grade);
+
+    /** 按主键锁母卷行，判可用与检修准入在同一事务内裁决。 */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from PaperRoll r where r.id = :id")
+    Optional<PaperRoll> findByIdForUpdate(@Param("id") Long id);
 
     /**
      * 按卷号查母卷并加写锁（SELECT ... FOR UPDATE）。

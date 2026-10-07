@@ -17,6 +17,7 @@ import com.paper.mill.repository.BizNoSeqRepository;
 public class BizNoGenerator {
 
     public static final String REQUISITION = "REQUISITION";
+    public static final String MAINTENANCE = "MAINTENANCE";
 
     private final BizNoSeqRepository seqRepository;
 
@@ -28,6 +29,12 @@ public class BizNoGenerator {
     public String nextRequisitionNo() {
         long n = next(REQUISITION);
         return String.format("LL-%06d", n);
+    }
+
+    @Transactional
+    public String nextMaintenanceNo() {
+        long n = next(MAINTENANCE);
+        return String.format("MX-%06d", n);
     }
 
     private long next(String name) {
