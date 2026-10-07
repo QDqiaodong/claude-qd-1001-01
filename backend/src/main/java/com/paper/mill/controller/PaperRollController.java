@@ -13,11 +13,17 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.paper.mill.common.ApiResponse;
+import com.paper.mill.dto.PaperRollProduceRequest;
+import com.paper.mill.dto.RollInspectionRequest;
 import com.paper.mill.entity.CuttingRequisition;
 import com.paper.mill.entity.PaperRoll;
+import com.paper.mill.entity.ProductionAttempt;
 import com.paper.mill.entity.RequisitionAttempt;
 import com.paper.mill.service.PaperRollService;
+import com.paper.mill.service.ProductionAttemptService;
 import com.paper.mill.service.RequisitionService;
+
+import jakarta.validation.Valid;
 
 /** 抄纸工段 · 纸卷接口 */
 @RestController
@@ -26,11 +32,14 @@ public class PaperRollController {
 
     private final PaperRollService rollService;
     private final RequisitionService requisitionService;
+    private final ProductionAttemptService productionAttemptService;
 
     public PaperRollController(PaperRollService rollService,
-                               RequisitionService requisitionService) {
+                               RequisitionService requisitionService,
+                               ProductionAttemptService productionAttemptService) {
         this.rollService = rollService;
         this.requisitionService = requisitionService;
+        this.productionAttemptService = productionAttemptService;
     }
 
     @GetMapping
@@ -45,24 +54,16 @@ public class PaperRollController {
         return ApiResponse.success(rollService.get(id));
     }
 
-    /** 抄造产出纸卷，targetGsm 为本批目标定量，用于自动判等 */
-    @PostMapping
-    public ApiResponse<PaperRoll> create(@RequestBody PaperRoll input,
-                                         @RequestParam(required = false) Integer targetGsm) {
-        return ApiResponse.success("纸卷已产出", rollService.create(input, targetGsm));
-    }
-
     @PutMapping("/{id}")
     public ApiResponse<PaperRoll> update(@PathVariable Long id, @RequestBody PaperRoll input) {
         return ApiResponse.success("已更新", rollService.update(id, input));
     }
 
-    /** 检验：待检 → 可用 / 报废 */
+    /** 检验：待检 → 可用 / 报废；检修中标记可用会被准入规则拒绝并留痕。 */
     @PostMapping("/{id}/inspect")
     public ApiResponse<PaperRoll> inspect(@PathVariable Long id,
-                                          @RequestParam String target,
-                                          @RequestParam(required = false) String grade) {
-        return ApiResponse.success("检验完成", rollService.inspect(id, target, grade));
+                                          @Valid @RequestBody RollInspectionRequest req) {
+        return ApiResponse.success("检验完成", rollService.inspect(id, req));
     }
 
     /** 状态流转：可用 → 已切完 / 报废 */
@@ -94,5 +95,13 @@ public class PaperRollController {
     public ApiResponse<List<RequisitionAttempt>> listAttempts(@PathVariable Long id) {
         rollService.get(id);
         return ApiResponse.success(requisitionService.attemptsByRoll(id));
+    }
+
+    // ---------------- 母卷产出准入（纸机导轨侧） ----------------
+
+    /** 纸机上被检修准入阻止的新建母卷/标记可用留痕。 */
+    @GetMapping("/by-machine/{machineId}/production-attempts")
+    public ApiResponse<List<ProductionAttempt>> productionAttempts(@PathVariable Long machineId) {
+        return ApiResponse.success(productionAttemptService.listByMachine(machineId));
     }
 }

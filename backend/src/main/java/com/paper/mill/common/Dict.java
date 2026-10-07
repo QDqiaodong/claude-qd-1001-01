@@ -29,6 +29,7 @@ public final class Dict {
     // ---------------- 纸机 ----------------
     public static final List<String> MACHINE_STATUSES = List.of("运行", "停机", "检修");
 
+    /** 运行/停机可进检修；检修单完成回停机，经办人确认后复机（专用检修接口负责经办人校验） */
     private static final Map<String, List<String>> MACHINE_NEXT = Map.of(
             "运行", List.of("停机", "检修"),
             "停机", List.of("运行", "检修"),

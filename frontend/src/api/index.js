@@ -42,13 +42,19 @@ export default {
   updateMachine: (id, d) => call(http.put(`/paper-machines/${id}`, d)),
   transferMachine: (id, target) => call(http.post(`/paper-machines/${id}/transfer`, null, params({ target }))),
   machineSummary: (id) => call(http.get(`/paper-machines/${id}/summary`)),
+  machineRail: (id) => call(http.get(`/paper-machines/${id}/rail`)),
+  machineMaintenances: (id) => call(http.get(`/paper-machines/${id}/maintenances`)),
+  startMaintenance: (id, d) => call(http.post(`/paper-machines/${id}/maintenance/start`, d)),
+  finishMaintenance: (id, d) => call(http.post(`/paper-machines/${id}/maintenance/finish`, d)),
+  resumeMaintenance: (id, d) => call(http.post(`/paper-machines/${id}/maintenance/resume`, d)),
+  produceRoll: (machineId, d) => call(http.post(`/paper-machines/${machineId}/rolls`, d)),
+  machineProductionAttempts: (machineId) =>
+    call(http.get(`/paper-rolls/by-machine/${machineId}/production-attempts`)),
 
   // ---------------- 纸卷 ----------------
   listRolls: (p) => call(http.get('/paper-rolls', params(p))),
-  createRoll: (d, targetGsm) => call(http.post('/paper-rolls', d, params({ targetGsm }))),
   updateRoll: (id, d) => call(http.put(`/paper-rolls/${id}`, d)),
-  inspectRoll: (id, target, grade) =>
-    call(http.post(`/paper-rolls/${id}/inspect`, null, params({ target, grade }))),
+  inspectRoll: (id, d) => call(http.post(`/paper-rolls/${id}/inspect`, d)),
   transferRoll: (id, target) => call(http.post(`/paper-rolls/${id}/transfer`, null, params({ target }))),
   consumeRoll: (id, lengthM, weightKg) =>
     call(http.post(`/paper-rolls/${id}/consume`, null, params({ lengthM, weightKg }))),

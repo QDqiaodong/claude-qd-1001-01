@@ -22,6 +22,8 @@ public interface PaperRollRepository extends JpaRepository<PaperRoll, Long> {
 
     List<PaperRoll> findByMachineIdAndStatus(Long machineId, String status);
 
+    long countByMachineIdAndStatus(Long machineId, String status);
+
     List<PaperRoll> findByGrade(String grade);
 
     /**
@@ -33,6 +35,10 @@ public interface PaperRollRepository extends JpaRepository<PaperRoll, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select r from PaperRoll r where r.rollNo = :rollNo")
     Optional<PaperRoll> findByRollNoForUpdate(@Param("rollNo") String rollNo);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from PaperRoll r where r.id = :id")
+    Optional<PaperRoll> findByIdForUpdate(@Param("id") Long id);
 
     /** 挑可切母卷：可用状态 + 定量匹配 + 幅宽足够，按剩余长度倒序 */
     List<PaperRoll> findByStatusAndGrammageGsmAndWidthMmGreaterThanEqualOrderByLengthMDesc(

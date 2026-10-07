@@ -19,7 +19,9 @@ DROP TABLE IF EXISTS finished_bundle;
 DROP TABLE IF EXISTS requisition_attempt;
 DROP TABLE IF EXISTS cutting_requisition;
 DROP TABLE IF EXISTS cutting_order;
+DROP TABLE IF EXISTS production_attempt;
 DROP TABLE IF EXISTS paper_roll;
+DROP TABLE IF EXISTS machine_maintenance;
 DROP TABLE IF EXISTS paper_machine;
 DROP TABLE IF EXISTS pulp_chest;
 DROP TABLE IF EXISTS biz_no_seq;
@@ -48,6 +50,28 @@ CREATE TABLE paper_machine (
     last_maintain_at DATETIME
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- ---------------- 抄纸工段 · 纸机检修单（只增不改） ----------------
+-- 运行/停机进入检修时必须记录原因、开始时间、预计结束时间和经办人。
+-- 检修完成只能回停机；同一经办人确认后才恢复运行。检修历史不因纸机状态变化删除。
+CREATE TABLE machine_maintenance (
+    id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+    maintenance_no   VARCHAR(32) NOT NULL UNIQUE COMMENT '检修单号 WX-xxxxxx',
+    machine_id       BIGINT      NOT NULL,
+    reason           VARCHAR(256) NOT NULL COMMENT '检修原因',
+    started_at       DATETIME    NOT NULL COMMENT '检修开始时间',
+    expected_end_at  DATETIME    NOT NULL COMMENT '预计结束时间',
+    finished_at      DATETIME    NULL COMMENT '实际完成时间，完成后纸机回停机',
+    resumed_at       DATETIME    NULL COMMENT '经办人确认复机时间',
+    operator         VARCHAR(32) NOT NULL COMMENT '发起检修的经办人',
+    finish_operator  VARCHAR(32) NULL,
+    resume_operator  VARCHAR(32) NULL,
+    record_status    VARCHAR(16) NOT NULL COMMENT '检修中/待复机确认/已复机',
+    created_at       DATETIME    NOT NULL,
+    CONSTRAINT fk_maintenance_machine FOREIGN KEY (machine_id) REFERENCES paper_machine (id),
+    INDEX idx_maintenance_machine_started (machine_id, started_at),
+    INDEX idx_maintenance_status (record_status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- ---------------- 抄纸工段 · 纸卷（母卷）----------------
 CREATE TABLE paper_roll (
     id           BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -60,7 +84,23 @@ CREATE TABLE paper_roll (
     grade        VARCHAR(16)  NOT NULL COMMENT '一等/二等/等外',
     status       VARCHAR(16)  NOT NULL COMMENT '待检/可用/已切完/报废',
     produced_at  DATETIME,
-    CONSTRAINT fk_roll_machine FOREIGN KEY (machine_id) REFERENCES paper_machine (id)
+    CONSTRAINT fk_roll_machine FOREIGN KEY (machine_id) REFERENCES paper_machine (id),
+    INDEX idx_roll_machine_status (machine_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------- 抄纸工段 · 检修期产出准入阻止留痕 ----------------
+-- 检修中新建母卷、或将新母卷标成可用时，不产生母卷、不改状态，但阻止原因落库；
+-- 刷新页面后纸机导轨仍能看到被谁、在何时、因为哪个检修单阻止。
+CREATE TABLE production_attempt (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    machine_id    BIGINT       NOT NULL,
+    roll_id       BIGINT       NULL,
+    action_type   VARCHAR(16)  NOT NULL COMMENT '新建母卷/标记可用',
+    roll_no       VARCHAR(32)  NULL,
+    operator      VARCHAR(32)  NULL,
+    block_reason  VARCHAR(512) NOT NULL,
+    attempted_at  DATETIME     NOT NULL,
+    INDEX idx_production_attempt_machine_time (machine_id, attempted_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------- 切纸工段 · 切纸订单 ----------------
@@ -121,9 +161,9 @@ CREATE TABLE requisition_attempt (
     INDEX idx_attempt_attempted (attempted_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- ---------------- 业务单号发号表（领料单号 LL-xxxxxx 在行锁内取号，并发不撞号） ----------------
+-- ---------------- 业务单号发号表（行锁内取号，并发不撞号） ----------------
 CREATE TABLE biz_no_seq (
-    seq_name  VARCHAR(32) NOT NULL PRIMARY KEY COMMENT '单号类别：REQUISITION=切裁领料单',
+    seq_name  VARCHAR(32) NOT NULL PRIMARY KEY COMMENT '单号类别：REQUISITION=切裁领料单，MAINTENANCE=检修单',
     next_val  BIGINT      NOT NULL COMMENT '下一个可用号码'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -158,7 +198,7 @@ INSERT INTO paper_machine (machine_code, machine_name, design_width_mm, design_s
 ('PM-01', '1号纸机', 3200, 650, '运行', UTC_TIMESTAMP() - INTERVAL 12 DAY),
 ('PM-02', '2号纸机', 2400, 480, '运行', UTC_TIMESTAMP() - INTERVAL 30 DAY),
 ('PM-03', '3号纸机', 1800, 320, '停机', UTC_TIMESTAMP() - INTERVAL 90 DAY),
-('PM-04', '4号纸机', 2800, 560, '检修', UTC_TIMESTAMP() - INTERVAL  5 DAY);
+('PM-04', '4号纸机', 2800, 560, '检修', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 5 DAY);
 
 -- 纸卷：PM-01 设计幅宽 3200，PM-02 设计幅宽 2400
 INSERT INTO paper_roll (roll_no, machine_id, grammage_gsm, width_mm, length_m, weight_kg, grade, status, produced_at) VALUES
@@ -169,6 +209,43 @@ INSERT INTO paper_roll (roll_no, machine_id, grammage_gsm, width_mm, length_m, w
 ('R-2026005', 2, 60, 2350,     0,    0.00, '二等', '已切完', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 DAY),
 ('R-2026006', 2, 90, 1200,  1500,  162.00, '等外', '待检',   UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 DAY),
 ('R-2026007', 1, 70, 3150,  8000, 1764.00, '一等', '可用',   UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 6 HOUR);
+
+-- 检修台账：历史检修已复机；PM-04 当前检修中。母卷归属和历史台账均不随状态变化消失。
+INSERT INTO machine_maintenance
+    (maintenance_no, machine_id, reason, started_at, expected_end_at, finished_at, resumed_at,
+     operator, finish_operator, resume_operator, record_status, created_at) VALUES
+('WX-000001', 1, '例行更换成形网并校准横幅定量',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 12 DAY,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 11 DAY,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 11 DAY + INTERVAL 6 HOUR,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 11 DAY + INTERVAL 7 HOUR,
+ '王建国', '王建国', '王建国', '已复机',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 12 DAY),
+('WX-000002', 2, '真空泵检修与润滑保养',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 30 DAY,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 29 DAY,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 29 DAY + INTERVAL 4 HOUR,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 29 DAY + INTERVAL 5 HOUR,
+ '李秀兰', '李秀兰', '李秀兰', '已复机',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 30 DAY),
+('WX-000003', 3, '传动轴承异响处理',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 90 DAY,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 89 DAY,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 89 DAY + INTERVAL 3 HOUR,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 89 DAY + INTERVAL 4 HOUR,
+ '赵强', '赵强', '赵强', '已复机',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 90 DAY),
+('WX-000004', 4, '烘缸表面检查及刮刀更换',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 5 DAY,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 1 DAY,
+ NULL, NULL, '赵强', NULL, NULL, '检修中',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 5 DAY);
+
+-- PM-04 检修中试图新建母卷，被准入规则阻止；母卷未产生，原因刷新后仍在。
+INSERT INTO production_attempt (machine_id, roll_id, action_type, roll_no, operator, block_reason, attempted_at) VALUES
+(4, NULL, '新建母卷', 'R-BLOCK-0001', '赵强',
+ '检修中不能新建纸卷；纸机 PM-04 当前为「检修」状态，新母卷不会获得准入，已有母卷归属和台账保持不变（本次新建母卷已阻止并留痕）',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 HOUR);
 
 INSERT INTO cutting_order (order_no, customer_name, target_grammage, target_width_mm, target_weight_kg, done_weight_kg, status, deadline) VALUES
 ('CO-2026001', '华东彩印', 70,  787, 1800.00,  620.00, '切裁中', UTC_TIMESTAMP() + INTERVAL 8 HOUR + INTERVAL 6 DAY),
@@ -204,5 +281,7 @@ INSERT INTO requisition_attempt
 ('seed-ok-0001', 1, 1, 1, 1000, 220.50, '王建国', 'SUCCESS', NULL,
  UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 HOUR);
 
--- 发号器初值：种子已占用 LL-000001，下一张领料单从 LL-000002 开始
-INSERT INTO biz_no_seq (seq_name, next_val) VALUES ('REQUISITION', 2);
+-- 发号器初值：种子已占用 LL-000001 与 WX-000001~000004。
+INSERT INTO biz_no_seq (seq_name, next_val) VALUES
+('REQUISITION', 2),
+('MAINTENANCE', 5);
